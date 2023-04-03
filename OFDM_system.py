@@ -1,9 +1,16 @@
+"""
+@Author: Jrun Ding
+@Date: 2023.4.2
+@Brief: OFDM simulation.
+        Transmitter 4 : tx_bits -> modulation -> pilot, VC -> ifftshift -> SP, IDFT, PS -> CP, RC window -> tx_symbols
+        Receiver 5 : rx_symbols -> timing, syn -> CP, RC window -> SP, DFT, PS -> fftshift -> VC, CE, equalization -> demodulation -> rx_bits
+@Coding: utf-8
+"""
+
 import numpy as np
 import matplotlib.pyplot as plt
 from scipy import interpolate
 import commpy as cpy
-import os
-from math import log10
 
 
 plt.rcParams['font.sans-serif'] = ['Microsoft YaHei']
@@ -41,12 +48,11 @@ class OFDM(object):
         # 每个OFDM符号的有效bit，即 数据子载波数 × mu，其余比特为循环前缀和导频
         self.payloadBits_per_OFDM = len(self.dataCarriers) * self.mu
 
-
     #   @brief：串并转换
     #   @param：离散信源 bits
     #   @return：bits.reshape((len(dataCarriers), bps))
     def SP(self, bits):
-        return bits.reshape(len(dataCarriers), bpe)
+        return bits.reshape(len(self.dataCarriers), self.bpe)
 
     #   @brief：并转串
     #   @param：bits
@@ -108,7 +114,7 @@ class OFDM(object):
     #   @param：payload
     #   @return：symbol
     def OFDM_symbol(self, signalModulated):
-        symbol = np.zeros(self.K, dtype=complex) # 子载波位置
+        symbol = np.zeros(self.K, dtype=complex)  # 子载波位置
         symbol[self.pilotCarriers] = self.pilotValue  # 在导频位置插入导频
         symbol[self.dataCarriers] = signalModulated  # 在数据位置插入数据
         return symbol
@@ -129,32 +135,32 @@ class OFDM(object):
     #   @brief：限幅
     #   @param：离散信号x，限幅范围CL
     #   @return：限幅后信号x_clipped
-    def clipping (self , x, CL):
+    def clipping(self, x, CL):
         sigma = np.sqrt(np.mean(np.square(np.abs(x))))  # 输入平方和取均值，再开方
-        CL = CL*sigma  # 限幅CL = CL×sigma
+        CL = CL * sigma  # 限幅CL = CL×sigma
         x_clipped = x
         clipped_idx = abs(x_clipped) > CL
-        x_clipped[clipped_idx] = np.divide((x_clipped[clipped_idx]*CL),abs(x_clipped[clipped_idx]))
+        x_clipped[clipped_idx] = np.divide((x_clipped[clipped_idx] * CL), abs(x_clipped[clipped_idx]))
         return x_clipped
 
     #   @brief：计算峰均功率比
     #   @param：离散信号x
     #   @return：PAPR[dB]
     def PAPR(self, x):
-        Power = np.abs(x)**2
+        Power = np.abs(x) ** 2
         PeakP = np.max(Power)
         AvgP = np.mean(Power)
-        PAPR_dB = 10*np.log10(PeakP/AvgP)
+        PAPR_dB = 10 * np.log10(PeakP / AvgP)
         return PAPR_dB
 
     #   @brief：AWGN信道
     #   @param：x_s, snrDB
     #   @return：x_s + noise, noise_pwr
     def add_awgn(self, x_s, snrDB):
-        data_pwr = np.mean(abs(x_s**2))
-        noise_pwr = data_pwr/(10**(snrDB/10))
-        noise = 1/np.sqrt(2) * (np.random.randn(len(x_s)) + 1j *
-                                np.random.randn(len(x_s))) * np.sqrt(noise_pwr)
+        data_pwr = np.mean(abs(x_s ** 2))
+        noise_pwr = data_pwr / (10 ** (snrDB / 10))
+        noise = 1 / np.sqrt(2) * (np.random.randn(len(x_s)) + 1j *
+                                  np.random.randn(len(x_s))) * np.sqrt(noise_pwr)
         return x_s + noise, noise_pwr
 
     #   @brief：信道模型
@@ -162,7 +168,7 @@ class OFDM(object):
     #   @return：out_signal, noise_pwr
     def channel(self, in_signal, SNRdb, channel_type="awgn"):
         # 假定SISO无线信道模型采用一个三抽头，定义冲激响应的抽头系数为[1, 0, 0.3+0.3j]
-        channelResponse = np.array([1, 0, 0.3+0.3j])  # 信道冲击响应
+        channelResponse = np.array([1, 0, 0.3 + 0.3j])  # 信道冲击响应
         if channel_type == "multipath":
             convolved = np.convolve(in_signal, channelResponse)
             out_signal, noise_pwr = self.add_awgn(convolved, SNRdb)
@@ -174,14 +180,13 @@ class OFDM(object):
     #   @param：signal
     #   @return：signal[CP:(CP+K)]
     def removeCP(self, signal):
-        return signal[self.CP:(self.CP+self.K)]
+        return signal[self.CP:(self.CP + self.K)]
 
     #   @brief：DFT
     #   @param：时域离散信号
     #   @return：频域离散信号
     def DFT(self, OFDMRxNoCP):
         return np.fft.fft(OFDMRxNoCP)
-
 
     #   @brief：采用内插方式，对信道进行估计   LS信道估计
     #   @param：OFDMDemod
@@ -194,9 +199,8 @@ class OFDM(object):
             Hest_at_pilots), kind='linear')(self.allCarriers)
         Hest_phase = interpolate.interp1d(self.pilotCarriers, np.angle(
             Hest_at_pilots), kind='linear')(self.allCarriers)
-        Hest = Hest_abs * np.exp(1j*Hest_phase)
+        Hest = Hest_abs * np.exp(1j * Hest_phase)
         return Hest
-
 
     #   @brief：MMSE信道估计  假设已知信道的时延功率谱，即时域信道矩阵h
     #   @param：OFDMDemod, pilot_idx ,SNR, pilotValue
@@ -235,29 +239,29 @@ class OFDM(object):
     #   @param：OFDMDemod, pilotIdx ,SNR, pilotValue, channelImpRes, Nfft, P, Nps
     #   接收数据  导频索引  信噪比  导频值  信道脉冲响应  fft长度  导频数  导频间隔
     #   @return：H_MMSE
-    def channelEstimateMMSE(self, OFDMDemod, pilotIdx ,SNR, pilotValue, channelImpRes, Nfft, P, Nps):
+    def channelEstimateMMSE(self, OFDMDemod, pilotIdx, SNR, pilotValue, channelImpRes, Nfft, P, Nps):
         h = channelImpRes  # 信道冲击响应
-        pilots = OFDMDemod[pilotIdx] #  取出导频位置值
+        pilots = OFDMDemod[pilotIdx]  # 取出导频位置值
         H_tilde = pilots / pilotValue  # (9,)  LS信道估计
 
-        snr = 10**(SNR*0.1)
-        k = np.arange(0, len(h)) # 1*3
-        hh = h@(np.conj(h).T) # 1*1
-        tmp = h*np.conj(h)*k # 1*3
-        r = sum(tmp)/hh # 1*1
-        r2 = tmp@(k.T)/hh # 1*1
-        tau_rms = np.sqrt(r2-r**2) # 1*1
-        df = 1.0/Nfft
-        j2pi_tau_df = 1j*2*3.1415926*tau_rms*df # 1*1
+        snr = 10 ** (SNR * 0.1)
+        k = np.arange(0, len(h))  # 1*3
+        hh = h @ (np.conj(h).T)  # 1*1
+        tmp = h * np.conj(h) * k  # 1*3
+        r = sum(tmp) / hh  # 1*1
+        r2 = tmp @ (k.T) / hh  # 1*1
+        tau_rms = np.sqrt(r2 - r ** 2)  # 1*1
+        df = 1.0 / Nfft
+        j2pi_tau_df = 1j * 2 * 3.1415926 * tau_rms * df  # 1*1
         K1 = np.tile(np.arange(0, Nfft).reshape(1, len(np.arange(0, Nfft))).T, (1, P))  # 64*9
         K2 = np.tile(np.arange(0, P).reshape(1, len(np.arange(0, P))), (Nfft, 1))  # 64*9
-        rf = np.reciprocal(1+j2pi_tau_df*(K1-K2*Nps))
+        rf = np.reciprocal(1 + j2pi_tau_df * (K1 - K2 * Nps))
         K3 = np.tile(np.arange(0, P).reshape(1, len(np.arange(0, P))).T, (1, P))
         K4 = np.tile(np.arange(0, P).reshape(1, len(np.arange(0, P))), (P, 1))
-        rf2 = np.reciprocal(1+j2pi_tau_df*Nps*(K3-K4))
+        rf2 = np.reciprocal(1 + j2pi_tau_df * Nps * (K3 - K4))
         Rhp = rf
-        Rpp = rf2+np.eye(len(H_tilde), len(H_tilde))/snr
-        H_MMSE = np.transpose(Rhp@np.linalg.inv(Rpp)@H_tilde.T)
+        Rpp = rf2 + np.eye(len(H_tilde), len(H_tilde)) / snr
+        H_MMSE = np.transpose(Rhp @ np.linalg.inv(Rpp) @ H_tilde.T)
         return H_MMSE
 
     '''
@@ -288,7 +292,35 @@ class OFDM(object):
     def get_payload(self, equalized):
         return equalized[self.dataCarriers]
 
+    def ifftshift(self, symbol):
+        """
+        @brief：基带信号搬移到以0为谱中频心
+        @param：映射后的符号序列numpy
+        @return：搬移后的符号序列numpy
+        """
+        if len(symbol) % 2 == 0:
+            right = symbol[:int(len(symbol) / 2)]
+            left = symbol[int(len(symbol) / 2):]
+            return np.append(left, right)
+        else:
+            right = symbol[:int((len(symbol)-1) / 2)+1]
+            left = symbol[int((len(symbol)-1) / 2)+1:]
+            return np.append(left, right)
 
+    def fftshift(self, symbol):
+        """
+        @brief：序列以0频为开始
+        @param：接收符号序列
+        @return：搬移后的符号序列numpy
+        """
+        if len(symbol) % 2 == 0:
+            right = symbol[int(len(symbol) / 2):]
+            left = symbol[:int(len(symbol) / 2)]
+            return np.append(right, left)
+        else:
+            right = symbol[int((len(symbol)-1) / 2):]
+            left = symbol[:int((len(symbol)-1) / 2)]
+            return np.append(right, left)
 
     #   @brief：OFDM通信系统仿真
     #   @param：void
@@ -307,27 +339,30 @@ class OFDM(object):
          '''
         # 信源
         bits = np.random.binomial(n=1, p=0.5, size=(
-        self.payloadBits_per_OFDM,))  # 信源产生随机信号0/1  产生1×payloadBits_per_OFDM的矩阵，每个元素取值0-n，均匀分布p
+            self.payloadBits_per_OFDM,))  # 信源产生随机信号0/1  产生1×payloadBits_per_OFDM的矩阵，每个元素取值0-n，均匀分布p
         print('TX bits:')
         print(bits)
         # 发送设备
-        signalModulated = self.modulation(bits)  # 调制，SP，频域并行数据
-        OFDMData = self.OFDM_symbol(signalModulated)  # OFDM信号  插入导频
+        signalModulated = self.modulation(bits)  # 调制
+        OFDMData = self.OFDM_symbol(signalModulated)  # 插入导频
         print('Complex on each subcarrier:')
         print(OFDMData)
-        OFDMTime = self.IDFT(OFDMData)  # 频域转时域，PS 64个OFDM点=一个OFDM符号
-        OFDMWithCP = self.addCP(OFDMTime)  # 加循环前缀
+        OFDMData_shift = self.ifftshift(OFDMData)  # 频谱搬移
+        OFDMTime = self.IDFT(OFDMData_shift)  # SP，IDFT，PS  64个OFDM点=一个OFDM符号
+        OFDMWithCP = self.addCP(OFDMTime)  # 加CP
 
         # SISO无线信道
         OFDMTx = OFDMWithCP  # 待发送时域串行比特流
         OFDMRx = self.channel(OFDMTx, self.SNRdb, self.channel_type)[0]  # 通过信道，[0]看原函数，表示只取输出信号
 
         # 接收设备
-        OFDMRxNoCP = self.removeCP(OFDMRx)  # 去循环前缀
-        OFDMDemod = self.DFT(OFDMRxNoCP)  # 时域转频域，SP
-        HestMMSE = self.channelEstimateMMSE(OFDMDemod, self.pilotCarriers, self.SNRdb, self.pilotValue, np.array([1, 0, 0.3 + 0.3j]), self.K, self.P,
-                                       self.K / (self.P - 1))  # 信道估计 MMSE
-        Hest = self.channelEstimateLS(OFDMDemod)  # 信道估计LS
+        OFDMRxNoCP = self.removeCP(OFDMRx)  # 去CP
+        OFDMDemod = self.DFT(OFDMRxNoCP)  # SP，DFT，PS
+        OFDMDemod_shift = self.fftshift(OFDMDemod)  # 频谱搬移
+        HestMMSE = self.channelEstimateMMSE(OFDMDemod_shift, self.pilotCarriers, self.SNRdb, self.pilotValue,
+                                            np.array([1, 0, 0.3 + 0.3j]), self.K, self.P,
+                                            self.K / (self.P - 1))  # 信道估计 MMSE
+        Hest = self.channelEstimateLS(OFDMDemod_shift)  # 信道估计LS
 
         '''
         #  绘制信道估计结果  信道估计结果即在每一子载波频点处信道H的幅值
@@ -341,7 +376,7 @@ class OFDM(object):
         plt.show()
         '''
 
-        equalizedHest = self.equalize(OFDMDemod, Hest)  # 利用估计的信道信息，进行均衡
+        equalizedHest = self.equalize(OFDMDemod_shift, Hest)  # 利用估计的信道信息，进行均衡
         OFDMRxData = self.get_payload(equalizedHest)  # 获取数据位置的数据
         bitsRx = self.demodulation(OFDMRxData)  # 解调，PS
 
@@ -352,6 +387,5 @@ class OFDM(object):
 
 
 if __name__ == '__main__':
-    ofdmsystem = OFDM(15, 64, 8) # 信噪比、子载波数、导频数
+    ofdmsystem = OFDM(15, 64, 8)  # 信噪比、子载波数、导频数
     ofdmsystem.OFDMSystemSimulation()
-
